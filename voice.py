@@ -62,7 +62,10 @@ def qwen_text(text: str) -> str:
     """Для Qwen3-TTS: звуковые теги превращаем в живые междометия, которые он произносит естественно."""
     text = re.sub(r"\[sighs?\]", "Эх...", text, flags=re.IGNORECASE)
     text = re.sub(r"\[(laughs?|giggles?|chuckles?)[^\]]*\]", "Ха-ха,", text, flags=re.IGNORECASE)
-    return clean(text).replace("+", "")
+    text = clean(text).replace("+", "")
+    for word, spoken in config.NAME_PRONUNCIATION.items():  # написание «для слуха», если модель путает ударение
+        text = re.sub(rf"\b{re.escape(word)}\b", spoken, text)
+    return text
 
 
 def clean(text: str, keep_tags: bool = False) -> str:
@@ -250,9 +253,44 @@ class Voice:
 
     def _qwen_chunks(self, text: str):
         """Потоковый синтез голосом богатыря (копия образца voices/dobrynya.wav)."""
+        import pylibrb
+
+        # модель говорит медленно, а скорость не настраивается — ускоряем готовый звук без изменения тона.
+        # Rubber Band в потоковом режиме: в отличие от WSOLA не даёт «шлепков» на стыках кусков
+        rb = None
+        if config.QWEN_SPEED != 1.0:
+            O = pylibrb.Option
+            rb = pylibrb.RubberBandStretcher(
+                self.qwen.sample_rate, 1,
+                O.PROCESS_REALTIME | O.ENGINE_FINER | O.FORMANT_PRESERVED | O.WINDOW_STANDARD
+                | O.TRANSIENTS_SMOOTH | O.PHASE_LAMINAR | O.PitchHighConsistency,
+                initial_time_ratio=1 / config.QWEN_SPEED)
+            rb.process(np.zeros((1, rb.get_preferred_start_pad()), dtype=np.float32))
+            skip = rb.get_start_delay()  # первые отсчёты — задержка алгоритма, их выбрасываем
+
+        def drain(final=False):
+            nonlocal skip
+            while rb.available() > 0:
+                out = rb.retrieve_available()[0]
+                if skip:
+                    cut = min(skip, len(out)); out = out[cut:]; skip -= cut
+                if len(out):
+                    yield out
+            if final:
+                return
+
         for result in self.qwen.generate(text=text, ref_audio=str(config.QWEN_VOICE), ref_text=config.QWEN_VOICE_TEXT,
-                                         lang_code="russian", stream=True, streaming_interval=0.4):
-            yield np.array(result.audio, dtype=np.float32)
+                                         lang_code="russian", temperature=config.QWEN_TEMPERATURE,
+                                         stream=True, streaming_interval=0.4):
+            audio = np.array(result.audio, dtype=np.float32)
+            if rb is None:
+                yield audio
+                continue
+            rb.process(np.ascontiguousarray(audio[None, :]))
+            yield from drain()
+        if rb is not None:
+            rb.process(np.zeros((1, 0), dtype=np.float32), final=True)
+            yield from drain(final=True)
 
     def _qwen_say_stream(self, pieces, on_start=None) -> str:
         """Каждое готовое предложение сразу уходит в синтез. Генерация и воспроизведение —

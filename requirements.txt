@@ -16,3 +16,4 @@ piper-tts
 pywebview
 silero-vad
 mlx-audio
+pylibrb

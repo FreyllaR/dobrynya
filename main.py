@@ -64,7 +64,7 @@ def voice_mode():
     tools.set_notifier(notify)
     last_talk = 0.0
 
-    voice.say("К вашим услугам, сэр.")
+    voice.say("На связи, сэр.")
     print(f"\nГотов. Скажи «{config.NAME}». Ctrl+C — выход.\n")
 
     while True:
@@ -86,7 +86,7 @@ def voice_mode():
             print(f"Ты: {text}")
             ui.set_state("thinking", user=text, answer="")
             if is_stop(text):
-                voice.say("Как скажете, сэр. Буду рядом.")
+                voice.say("Понял, сэр.")
                 break
 
             timings = {"распознал": time.time() - heard_at}

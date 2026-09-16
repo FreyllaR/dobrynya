@@ -142,7 +142,7 @@ def _reminder_loop():
         for r in due:
             text = r["text"]
             _osascript(f'display notification "{text}" with title "{config.NAME}" sound name "Glass"')
-            _notify(f"Сэр, позвольте напомнить: {text}")
+            _notify(f"Сэр, напоминаю: {text}")
 
 
 threading.Thread(target=_reminder_loop, daemon=True).start()
