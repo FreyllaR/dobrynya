@@ -13,7 +13,7 @@ def system_prompt() -> str:
     memory = "\n".join(f"- {f}" for f in facts) if facts else "пока ничего"
     user = f"Хозяина зовут {config.USER_NAME}. " if config.USER_NAME else ""
     nonverbal = ""
-    if config.TTS_ENGINE == "gemini" and config.VOICE_NONVERBAL:
+    if config.TTS_ENGINE in ("gemini", "qwen") and config.VOICE_NONVERBAL:
         nonverbal = """Живая речь (тебя озвучивает выразительный голос):
 - Изредка вставляй междометия: «хм», «м-м», «ах», «ну что ж».
 - Можешь добавлять звуковые теги в квадратных скобках: [sighs] — вздох, [laughs softly] — тихий смешок,

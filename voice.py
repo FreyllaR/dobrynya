@@ -14,6 +14,7 @@ import ui
 _speak_lock = threading.Lock()
 SAMPLE_RATE = 48000
 GEMINI_SR = 24000  # Gemini TTS отдаёт 16-битный PCM 24 кГц
+QWEN_PREBUFFER = 0.35  # секунд звука копим перед стартом, чтобы не было рывков
 EDGE_DEADLINE = 6  # секунд; дольше — говорим запасным голосом
 
 
@@ -55,6 +56,13 @@ TAG_RE = re.compile(r"\[[a-zA-Z ,'-]{2,40}\]\s*")  # звуковые теги: 
 def strip_tags(text: str) -> str:
     """Убирает звуковые теги — для субтитров и голосов, которые их не понимают."""
     return re.sub(r"\s+", " ", TAG_RE.sub("", text)).strip()
+
+
+def qwen_text(text: str) -> str:
+    """Для Qwen3-TTS: звуковые теги превращаем в живые междометия, которые он произносит естественно."""
+    text = re.sub(r"\[sighs?\]", "Эх...", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[(laughs?|giggles?|chuckles?)[^\]]*\]", "Ха-ха,", text, flags=re.IGNORECASE)
+    return clean(text).replace("+", "")
 
 
 def clean(text: str, keep_tags: bool = False) -> str:
@@ -121,7 +129,17 @@ class Voice:
             from google.genai import types
             self.gemini = genai.Client(api_key=config.GEMINI_API_KEY, http_options=types.HttpOptions(
                 timeout=60_000, retry_options=types.HttpRetryOptions(attempts=1)))
-        if self.engine in ("piper", "gemini"):  # для Gemini Piper — запасной голос
+        self.qwen = None
+        if self.engine == "qwen":
+            try:
+                from mlx_audio.tts.utils import load_model
+                print("[голос] загружаю Qwen3-TTS…")
+                self.qwen = load_model(config.QWEN_MODEL)
+                for _ in self._qwen_chunks("Готов."):  # прогрев: первая генерация компилирует модель
+                    pass
+            except Exception as e:
+                print(f"[голос] Qwen3-TTS не загрузился ({e}), использую Piper")
+        if self.engine in ("piper", "gemini", "qwen"):  # для облачных и Qwen Piper — запасной голос
             try:
                 from piper import PiperVoice
                 self.piper = PiperVoice.load(config.BASE_DIR / "models" / "piper" / f"{config.PIPER_VOICE}.onnx")
@@ -156,6 +174,8 @@ class Voice:
         import sounddevice as sd
 
         with _speak_lock:
+            if self.engine == "qwen" and self.qwen:
+                return self._qwen_say_stream(pieces, on_start)
             if self.engine == "gemini":
                 # ответ целиком: одна интонация на всю реплику и один запрос к лимиту
                 text = "".join(pieces)
@@ -217,7 +237,7 @@ class Voice:
 
     def render(self, text: str) -> np.ndarray:
         audio = None
-        if self.engine in ("piper", "gemini") and self.piper:
+        if self.engine in ("piper", "gemini", "qwen") and self.piper:
             audio = self._piper(text)
         elif self.engine == "edge":
             try:
@@ -227,6 +247,84 @@ class Voice:
         if audio is None:
             audio = self._silero(text)
         return soft_effect(audio) if config.VOICE_EFFECT == "soft" else audio
+
+    def _qwen_chunks(self, text: str):
+        """Потоковый синтез голосом богатыря (копия образца voices/dobrynya.wav)."""
+        for result in self.qwen.generate(text=text, ref_audio=str(config.QWEN_VOICE), ref_text=config.QWEN_VOICE_TEXT,
+                                         lang_code="russian", stream=True, streaming_interval=0.4):
+            yield np.array(result.audio, dtype=np.float32)
+
+    def _qwen_say_stream(self, pieces, on_start=None) -> str:
+        """Каждое готовое предложение сразу уходит в синтез. Генерация и воспроизведение —
+        в разных потоках: модель наполняет очередь с опережением, колонки играют из неё без пауз."""
+        import queue
+
+        import sounddevice as sd
+        from scipy.signal import resample_poly
+
+        sr = self.qwen.sample_rate
+        sentences: queue.Queue = queue.Queue()
+        audio_q: queue.Queue = queue.Queue()
+
+        def generator():
+            while (sentence := sentences.get()) is not None:
+                try:
+                    for audio in self._qwen_chunks(sentence):
+                        audio_q.put(audio * config.QWEN_VOLUME)
+                except Exception as e:  # сбой модели — это предложение скажет Piper
+                    print(f"[голос] Qwen3-TTS: {e} — говорю через Piper")
+                    if self.piper:
+                        audio_q.put(resample_poly(self._piper(strip_tags(sentence)), sr, SAMPLE_RATE).astype(np.float32))
+            audio_q.put(None)
+
+        def player():
+            # запас перед стартом: колонки не догонят модель на первых словах
+            pending, buffered, done = [], 0.0, False
+            while buffered < QWEN_PREBUFFER and not done:
+                item = audio_q.get()
+                if item is None:
+                    done = True
+                else:
+                    pending.append(item)
+                    buffered += len(item) / sr
+            if not pending:
+                return
+            if on_start:
+                on_start()
+            with sd.OutputStream(samplerate=sr, channels=1, dtype="float32") as out:
+                while True:
+                    for audio in pending:
+                        ui.speaking(audio, sr)  # шар двигается в такт речи
+                        out.write(audio.reshape(-1, 1))
+                    if done:
+                        break
+                    item = audio_q.get()
+                    if item is None:
+                        break
+                    pending = [item]
+            ui.speaking_done()
+
+        gen_thread = threading.Thread(target=generator, daemon=True)
+        play_thread = threading.Thread(target=player, daemon=True)
+        gen_thread.start()
+        play_thread.start()
+
+        def submit(sentence):
+            spoken = qwen_text(sentence)
+            if re.search(r"[а-яА-Яa-zA-Z]", spoken):
+                sentences.put(spoken)
+
+        full, buffer = "", ""
+        for piece in pieces:
+            full += piece
+            buffer += piece
+            while m := re.search(r"[.!?…]+[\s»\"]+", buffer):
+                submit(buffer[:m.end()])
+                buffer = buffer[m.end():]
+        submit(buffer)
+        sentences.put(None)
+        play_thread.join()
+        return strip_tags(full)
 
     def _gemini_say(self, text: str, on_start=None):
         """Живой голос Gemini TTS: интонации, вздохи, смешки. Звук играет по мере генерации."""

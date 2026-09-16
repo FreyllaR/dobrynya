@@ -51,9 +51,20 @@ SHOW_ORB = True                   # окно с анимированным ша�
 ORB_ON_TOP = False                # True — окно всегда поверх остальных
 SHOW_TIMINGS = True               # печатать, сколько заняло каждое звено
 
+def _models_downloaded(*repos: str) -> bool:
+    hub = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface")) / "hub"
+    return all(any((hub / f"models--{r.replace('/', '--')}" / "snapshots").glob("*/*")) for r in repos)
+
+
 # --- Голос ---
-TTS_ENGINE = "gemini"             # "gemini" — живой голос с интонациями и вздохами (облако, ~1,5 с);
-                                  # "piper" — мгновенно и локально; "edge", "silero", "say" — запасные
+TTS_ENGINE = "qwen"               # "qwen" — живой низкий голос богатыря, локально (~0,3 с до звука);
+                                  # "piper" — мгновенно, но проще; "gemini" — облако, лимит 10 ответов в день;
+                                  # "edge", "silero", "say" — запасные
+
+QWEN_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-4bit"
+QWEN_VOICE = BASE_DIR / "voices" / "dobrynya.wav"   # образец голоса: Добрыня говорит так же
+QWEN_VOICE_TEXT = "Добрый вечер, сэр. Хм... все системы работают в штатном режиме. Напомнить вам позвонить маме в девять утра?"
+QWEN_VOLUME = 0.9
 
 GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 GEMINI_VOICE = "Charon"           # мужские: Charon, Algieba, Sadaltager, Iapetus, Orus, Enceladus
@@ -64,7 +75,7 @@ GEMINI_VOICE_STYLE = (            # режиссёрская заметка: к�
 )
 GEMINI_VOLUME = 0.9
 GEMINI_TTS_TIMEOUT = 8            # секунд ждать первый звук, потом — запасной голос Piper
-VOICE_NONVERBAL = True            # вздохи, смешки и «хм» в ответах
+VOICE_NONVERBAL = True            # вздохи, смешки и «хм» в ответах (для gemini и qwen)
 
 VOICE_EFFECT = "soft"             # "soft" — мягкий тёплый тембр; "" — без обработки
 VOICE_SOFTNESS = 0.7              # 0 — почти без обработки, 1 — максимально бархатно
@@ -95,3 +106,8 @@ STRESS_FIXES = {
     "добрыне": "добр+ыне",
 }
 SAY_VOICE = "Milena"              # голос для движка "say"
+
+# Модели уже скачаны — не проверяем обновления на HuggingFace при каждом запуске:
+# с медленной сетью или VPN эта проверка растягивала загрузку на десятки секунд.
+if _models_downloaded(WHISPER_MODEL, QWEN_MODEL):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")

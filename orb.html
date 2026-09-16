@@ -39,7 +39,7 @@
 </head>
 <body>
 <div id="stage">
-  <canvas id="orb" width="640" height="640"></canvas>
+  <canvas id="orb" width="440" height="440"></canvas>
   <div id="status">Загружаюсь…</div>
   <div id="caption"></div>
 </div>
@@ -74,7 +74,7 @@ float noise(vec3 x) {
 }
 float fbm(vec3 p) {
   float v = 0.0, a = 0.5;
-  for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.02 + 3.1; a *= 0.5; }
+  for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.02 + 3.1; a *= 0.5; }
   return v;
 }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
@@ -185,7 +185,9 @@ function demoTick() {
 }
 
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  // 30 кадров в секунду: шару хватает, а видеокарта остаётся голосу и распознаванию речи
+  if (now - last < 32) { requestAnimationFrame(frame); return; }
+  const dt = Math.min(0.08, (now - last) / 1000); last = now;
   const st = target.state;
   const ease = k => 1 - Math.exp(-k * dt);
   mix.listen += ((st === 'listening') - mix.listen) * ease(6);
@@ -197,10 +199,11 @@ function frame(now) {
   mix.level += (lv - mix.level) * ease(lv > mix.level ? 18 : 7);
   innerTime += dt * (1 + 2.2 * mix.think + 0.8 * mix.level);
 
-  statusEl.textContent = LABELS[st] || '';
+  const label = LABELS[st] || '';
+  if (statusEl.textContent !== label) statusEl.textContent = label;  // текст трогаем, только когда он меняется
   const caption = st === 'speaking' ? target.answer : (st === 'thinking' || st === 'listening') ? target.user : '';
   if (captionEl.textContent !== caption) captionEl.textContent = caption;
-  captionEl.classList.toggle('on', !!caption);
+  if (captionEl.classList.contains('on') !== !!caption) captionEl.classList.toggle('on', !!caption);
 
   gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);

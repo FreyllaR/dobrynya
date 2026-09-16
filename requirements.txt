@@ -15,3 +15,4 @@ edge-tts
 piper-tts
 pywebview
 silero-vad
+mlx-audio
