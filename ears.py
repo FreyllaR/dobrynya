@@ -1,5 +1,6 @@
 """Уши: постоянное прослушивание слова активации и запись фразы."""
 import json
+import re
 import queue
 import subprocess
 import time
@@ -12,6 +13,20 @@ import config
 import ui
 
 BLOCK = 1600  # 100 мс при 16 кГц
+VAD_WINDOW = 512  # Silero VAD принимает окна по 32 мс
+_VAD = None
+
+# галлюцинации Whisper на тишине и шуме (обучался на видео с субтитрами)
+JUNK_PATTERNS = [
+    r"продолжение следует\W*",
+    r"субтитр\w*[^.!?]*[.!?]?",
+    r"редактор субтитров[^.!?]*[.!?]?",
+    r"корректор [^.!?]*[.!?]?",
+    r"спасибо за просмотр\w*\W*",
+    r"подписывайтесь на канал\W*",
+    r"ставьте лайки\W*",
+    r"dimatorzok\W*",
+]
 
 
 class Ears:
@@ -75,37 +90,62 @@ class Ears:
         a = np.frombuffer(data, dtype=np.int16).astype(np.float32)
         return float(np.sqrt(np.mean(a * a))) if a.size else 0.0
 
+    def _vad(self):
+        """Нейросетевой детектор речи Silero VAD: отличает речь от тишины, а не громкое от тихого."""
+        global _VAD
+        if _VAD is None:
+            from silero_vad import load_silero_vad
+            _VAD = load_silero_vad(onnx=True)
+        return _VAD
+
+    def _speech_prob(self, data: bytes, state: dict) -> float:
+        """Вероятность речи в блоке (максимум по окнам 32 мс)."""
+        import torch
+        vad = self._vad()
+        state["buf"] = np.concatenate([state["buf"], np.frombuffer(data, dtype=np.int16).astype(np.float32) / 32768])
+        best = 0.0
+        while len(state["buf"]) >= VAD_WINDOW:
+            window, state["buf"] = state["buf"][:VAD_WINDOW], state["buf"][VAD_WINDOW:]
+            best = max(best, vad(torch.from_numpy(window), config.SAMPLE_RATE).item())
+        return best
+
     def record_phrase(self, already_started=False, silence=None, wait=None) -> np.ndarray | None:
-        """Пишет звук, пока человек говорит; возвращает None, если так и не заговорил."""
-        threshold = min(max(self.noise_level * 2.5, 400), 2500)
+        """Пишет звук, пока человек говорит; возвращает None, если так и не заговорил.
+        Конец фразы — когда VAD не слышит речь `silence` секунд подряд."""
         silence = silence or config.SILENCE_SECONDS
         wait = wait or config.WAIT_SPEECH_SECONDS
         block_sec = BLOCK / config.SAMPLE_RATE
+        self._vad().reset_states()
+        vad_state = {"buf": np.zeros(0, dtype=np.float32)}
         chunks, pre = [], []
-        started, loud_blocks, silent, start = already_started, 0, 0.0, time.time()
+        started, speech_sec, silent, last_speech = already_started, 0.0, 0.0, 0
+        start = time.time()
         while True:
             data = self.q.get()
-            loud = self._rms(data) > threshold
+            is_speech = self._speech_prob(data, vad_state) > 0.5
             if not started:
-                pre = (pre + [data])[-3:]  # 300 мс до начала речи, чтобы не срезать первый слог
-                if loud:
-                    started, chunks, loud_blocks, silent = True, pre[:], 1, 0.0
+                pre = (pre + [data])[-5:]  # полсекунды до начала речи, чтобы не срезать первый слог
+                if is_speech:
+                    started, chunks, speech_sec, silent = True, pre[:], block_sec, 0.0
+                    last_speech = len(chunks)
                 elif time.time() - start > wait:
                     return None
                 continue
             chunks.append(data)
-            if loud:
-                loud_blocks, silent = loud_blocks + 1, 0.0
+            if is_speech:
+                speech_sec, silent, last_speech = speech_sec + block_sec, 0.0, len(chunks)
             else:
                 silent += block_sec
             if silent >= silence:
-                if already_started or loud_blocks >= 3:
+                if already_started or speech_sec >= 0.3:
                     break
-                # короткий щелчок или стук — не речь, ждём дальше
+                # щелчок, стук или вздох — не речь, ждём дальше
                 started, chunks, pre = False, [], []
             if time.time() - start > config.MAX_RECORD_SECONDS:
                 break
         self.speech_ended = time.time()
+        # хвост тишины Whisper не нужен: на нём он и выдумывает «Продолжение следует»
+        chunks = chunks[:last_speech + 3]
         pcm = np.frombuffer(b"".join(chunks), dtype=np.int16)
         return pcm.astype(np.float32) / 32768.0
 
@@ -124,18 +164,13 @@ class Ears:
 
     @staticmethod
     def clean_text(text: str) -> str:
-        # Whisper иногда «слышит» титры в тишине
-        junk = ("субтитры", "продолжение следует", "спасибо за просмотр", "редактор субтитров")
-        if any(j in text.lower() for j in junk):
-            return ""
-        # убираем обращение: «Эй, Добрыня, какая погода?» -> «какая погода?»
-        low = text.lower()
-        for w in config.WAKE_WORDS:
-            i = low.find(w)
-            if i != -1 and i < 8:
-                text = text[i + len(w):]
-                break
-        text = text.lstrip(" ,.!?-—")
+        # Whisper иногда дописывает «титры» на тишине — вырезаем их, остальное оставляем
+        for pattern in JUNK_PATTERNS:
+            text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+        # убираем обращение: «Эй, Добрыня, Добрыня, какая погода?» -> «какая погода?»
+        names = "|".join(map(re.escape, config.WAKE_WORDS))
+        text = re.sub(rf"^\W*(?:(?:эй|алло?|алё|слушай)\W+)?(?:(?:{names})\W*)+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+", " ", text).strip(" ,.!?-—")
         return text if sum(c.isalpha() for c in text) >= 2 else ""
 
 

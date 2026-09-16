@@ -125,6 +125,12 @@ def voice_mode():
 
 if __name__ == "__main__":
     try:
-        text_mode() if "--text" in sys.argv else voice_mode()
+        if "--mic-test" in sys.argv:
+            import mic_test
+            mic_test.main()
+        elif "--text" in sys.argv:
+            text_mode()
+        else:
+            voice_mode()
     except KeyboardInterrupt:
         print("\nДо встречи!")
