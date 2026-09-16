@@ -12,14 +12,15 @@ import sounddevice as sd
 import vosk
 
 import config
-from ears import BLOCK, Ears
+from ears import BLOCK, Ears, pick_microphone
 
 SECONDS = 15
 PATH = config.DATA_DIR / "mic_test.wav"
 
 
 def main():
-    dev = sd.query_devices(kind="input")
+    device = pick_microphone()
+    dev = sd.query_devices(device) if device is not None else sd.query_devices(kind="input")
     print(f"Микрофон: {dev['name']}\n")
     print("Запись длится 15 секунд. Скажите обычным голосом, как говорите с Добрыней, с паузами:")
     print("  1) «Добрыня»")
@@ -27,7 +28,7 @@ def main():
     print("  3) «Напомни мне завтра в девять утра, э-э, позвонить маме»\n")
     input("Нажмите Enter и начинайте говорить…")
     print("🔴 Запись…")
-    audio = sd.rec(SECONDS * config.SAMPLE_RATE, samplerate=config.SAMPLE_RATE, channels=1, dtype="int16")
+    audio = sd.rec(SECONDS * config.SAMPLE_RATE, samplerate=config.SAMPLE_RATE, channels=1, dtype="int16", device=device)
     for i in range(SECONDS, 0, -1):
         print(f"\r   осталось {i:2d} с", end="", flush=True)
         time.sleep(1)

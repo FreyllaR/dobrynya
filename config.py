@@ -43,6 +43,10 @@ HISTORY_LIMIT = 20                # сколько последних сообщ
 VOSK_MODEL_PATH = BASE_DIR / "models" / "vosk-model-small-ru-0.22"
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
 SAMPLE_RATE = 16000
+# Какой микрофон слушать: часть названия устройства или None — системный по умолчанию.
+# Встроенный микрофон лучше Bluetooth-гарнитуры: когда программа берёт микрофон гарнитуры,
+# macOS переводит её в «телефонный» режим и голос Добрыни в наушниках начинает хрипеть и рваться.
+MIC_DEVICE = "MacBook"
 SILENCE_SECONDS = 1.0             # пауза, после которой считаем, что ты договорил
 MAX_RECORD_SECONDS = 20
 WAIT_SPEECH_SECONDS = 6           # сколько ждать начала фразы после «Добрыня»

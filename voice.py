@@ -14,7 +14,7 @@ import ui
 _speak_lock = threading.Lock()
 SAMPLE_RATE = 48000
 GEMINI_SR = 24000  # Gemini TTS отдаёт 16-битный PCM 24 кГц
-QWEN_PREBUFFER = 0.35  # секунд звука копим перед стартом, чтобы не было рывков
+QWEN_PREBUFFER = 0.5  # секунд звука копим перед стартом, чтобы не было рывков
 EDGE_DEADLINE = 6  # секунд; дольше — говорим запасным голосом
 
 

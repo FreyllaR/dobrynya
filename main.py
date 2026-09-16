@@ -4,6 +4,7 @@
     ./run.sh          — голосовой режим (скажи «Добрыня»)
     ./run.sh --text   — текстовый режим, удобно для отладки навыков
 """
+import signal
 import sys
 import time
 
@@ -124,7 +125,14 @@ def voice_mode():
         print(f"💤 жду «{config.NAME}»\n")
 
 
+def exit_on_ctrl_z(*_):
+    # Ctrl+Z в терминале не закрывает программу, а замораживает её вместе с моделями и микрофоном.
+    # Чтобы в памяти не копились «зависшие» Добрыни, считаем Ctrl+Z выходом.
+    raise KeyboardInterrupt
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTSTP, exit_on_ctrl_z)
     try:
         if "--mic-test" in sys.argv:
             import mic_test

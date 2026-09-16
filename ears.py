@@ -29,12 +29,25 @@ JUNK_PATTERNS = [
 ]
 
 
+def pick_microphone():
+    """Номер микрофона из config.MIC_DEVICE (по части названия) или None — системный по умолчанию."""
+    if not config.MIC_DEVICE:
+        return None
+    for i, dev in enumerate(sd.query_devices()):
+        if dev["max_input_channels"] > 0 and config.MIC_DEVICE.lower() in dev["name"].lower():
+            return i
+    print(f"[уши] микрофон «{config.MIC_DEVICE}» не найден, беру системный по умолчанию")
+    return None
+
+
 class Ears:
     def __init__(self):
         vosk.SetLogLevel(-1)
         self.vosk_model = vosk.Model(str(config.VOSK_MODEL_PATH))
         self.q: queue.Queue = queue.Queue()
-        self.stream = sd.RawInputStream(samplerate=config.SAMPLE_RATE, blocksize=BLOCK,
+        device = pick_microphone()
+        print(f"[уши] микрофон: {sd.query_devices(device)['name'] if device is not None else sd.query_devices(kind='input')['name']}")
+        self.stream = sd.RawInputStream(samplerate=config.SAMPLE_RATE, blocksize=BLOCK, device=device,
                                         dtype="int16", channels=1,
                                         callback=self._on_audio)
         self.stream.start()
