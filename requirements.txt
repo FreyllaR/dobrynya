@@ -1,0 +1,16 @@
+ollama
+vosk
+sounddevice
+numpy
+mlx-whisper
+torch
+omegaconf
+num2words
+requests
+ddgs
+feedparser
+google-genai
+scipy
+edge-tts
+piper-tts
+pywebview

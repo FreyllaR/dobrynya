@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Добрыня</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --text: rgba(255, 255, 255, 0.92);
+    --text-dim: rgba(255, 255, 255, 0.6);
+    --pill: rgba(12, 16, 28, 0.62);
+  }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: transparent;
+    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    color: var(--text);
+    -webkit-user-select: none; user-select: none; cursor: default;
+  }
+  body.demo { background: #0b0d12; }
+  #stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
+  canvas { width: 300px; height: 300px; margin-top: 4px; }
+  #status {
+    margin-top: -6px; padding: 4px 12px; border-radius: 999px;
+    background: var(--pill); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    color: var(--text-dim); font-size: 12px; letter-spacing: 0.02em;
+    transition: color .3s;
+  }
+  #caption {
+    margin-top: 8px; max-width: 290px; min-height: 18px; padding: 0 8px;
+    text-align: center; color: var(--text);
+    text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    opacity: 0; transition: opacity .35s;
+  }
+  #caption.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="stage" class="pywebview-drag-region">
+  <canvas id="orb" width="600" height="600" class="pywebview-drag-region"></canvas>
+  <div id="status">Загружаюсь…</div>
+  <div id="caption"></div>
+</div>
+
+<script>
+const VERT = `
+attribute vec2 pos;
+void main() { gl_Position = vec4(pos, 0.0, 1.0); }`;
+
+// Шар: облачная текстура на вращающейся сфере + мягкое свечение вокруг.
+const FRAG = `
+precision highp float;
+uniform vec2  res;
+uniform float time;     // накопленное «внутреннее» время — быстрее, когда думает
+uniform float level;    // громкость голоса 0..1
+uniform float listen;   // 0..1
+uniform float think;    // 0..1
+uniform float speak;    // 0..1
+uniform float idle;     // 0..1
+
+float hash(vec3 p) {
+  p = fract(p * 0.3183099 + 0.1); p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise(vec3 x) {
+  vec3 i = floor(x), f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hash(i + vec3(0,0,0)), hash(i + vec3(1,0,0)), f.x),
+                 mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x),
+                 mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float fbm(vec3 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.02 + 3.1; a *= 0.5; }
+  return v;
+}
+mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * res) / res.y;
+  float breath = sin(time * 1.3) * 0.5 + 0.5;
+  float r = 0.30 * (1.0 + 0.025 * breath * idle + 0.10 * level * (listen + speak));
+  float d = length(uv);
+
+  // вращение облака: медленно в покое, закручивается воронкой, когда думает
+  vec2 q = uv * rot(think * (time * 0.9 + (1.0 - d / r) * 2.2));
+  vec2 s = q / r;
+  float inside = 1.0 - dot(s, s);
+  float z = sqrt(max(inside, 0.0));
+  vec3 p = vec3(s, z);
+  p.xz *= rot(time * 0.25);
+  p.xy *= rot(time * 0.11);
+
+  // крупные мягкие облака с искажением координат — «живая» текстура
+  vec3 warp = vec3(fbm(p * 0.9 + time * 0.10), fbm(p * 0.9 - time * 0.08 + 7.3), fbm(p * 0.9 + 3.7));
+  float n = fbm(p * 1.1 + warp * (1.6 + 1.4 * level) + vec3(0.0, 0.0, time * 0.15));
+
+  // небо: насыщенный синий снизу, светло-голубой сверху
+  vec3 deep  = vec3(0.00, 0.30, 1.00);
+  vec3 sky   = vec3(0.45, 0.78, 1.00);
+  vec3 cloud = vec3(0.97, 0.99, 1.00);
+  float h = smoothstep(-1.0, 1.0, s.y + 0.6 * (n - 0.5));
+  vec3 col = mix(deep, sky, h);
+  // облачные полосы: белые, с мягкими краями
+  float streak = smoothstep(0.52, 0.80, n + 0.08 * h + 0.2 * level * speak);
+  col = mix(col, cloud, streak * 0.85);
+
+  // объём без тёмных пятен: лёгкий блик сверху и насыщенный край
+  float light = clamp(dot(vec3(s, z), normalize(vec3(-0.35, 0.65, 0.7))), 0.0, 1.0);
+  col += vec3(0.10, 0.10, 0.08) * pow(light, 6.0);
+  col = mix(deep * 0.9 + vec3(0.05, 0.1, 0.0), col, smoothstep(0.0, 0.45, z));
+
+  float aa = 1.5 / res.y;
+  float alpha = smoothstep(r + aa, r - aa, d);
+
+  // свечение вокруг шара, ярче когда говорит
+  float glowAmt = 0.18 + 0.35 * level * speak + 0.15 * think;
+  float glow = exp(-max(d - r, 0.0) * 22.0) * glowAmt * (1.0 - alpha);
+  vec3 glowCol = vec3(0.25, 0.55, 1.0);
+
+  vec3 outCol = col * alpha + glowCol * glow;
+  float outA = clamp(alpha + glow, 0.0, 1.0);
+  gl_FragColor = vec4(outCol, outA);   // premultiplied alpha — прозрачный фон окна
+}`;
+
+const canvas = document.getElementById('orb');
+const gl = canvas.getContext('webgl', { premultipliedAlpha: true, alpha: true, antialias: true });
+const statusEl = document.getElementById('status');
+const captionEl = document.getElementById('caption');
+
+function shader(type, src) {
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, shader(gl.VERTEX_SHADER, VERT));
+gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FRAG));
+gl.linkProgram(prog); gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(prog, 'pos');
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+const U = n => gl.getUniformLocation(prog, n);
+const uRes = U('res'), uTime = U('time'), uLevel = U('level'),
+      uListen = U('listen'), uThink = U('think'), uSpeak = U('speak'), uIdle = U('idle');
+
+// --- состояние ---------------------------------------------------------
+const LABELS = {
+  loading: 'Загружаюсь…', idle: 'Скажите «Добрыня»',
+  listening: 'Слушаю', thinking: 'Думаю', speaking: 'Говорю',
+};
+let target = { state: 'loading', level: 0, user: '', answer: '' };
+const mix = { listen: 0, think: 0, speak: 0, idle: 1, level: 0 };
+let innerTime = 0, last = performance.now(), failures = 0;
+
+const params = new URLSearchParams(location.search);
+const demo = params.has('demo');  // ?demo — анимация без Добрыни, ?bg — тёмный фон для просмотра в браузере
+if (demo || params.has('bg')) document.body.classList.add('demo');
+
+async function poll() {
+  if (demo) return demoTick();
+  try {
+    const r = await fetch('/state', { cache: 'no-store' });
+    target = await r.json(); failures = 0;
+  } catch (e) {
+    // Добрыня выключен — закрываем окно
+    if (++failures > 40 && window.pywebview) window.pywebview.api.quit();
+  }
+}
+setInterval(poll, 50);
+
+function demoTick() {
+  const t = performance.now() / 1000 % 16;
+  const state = t < 4 ? 'idle' : t < 8 ? 'listening' : t < 11 ? 'thinking' : 'speaking';
+  const wobble = Math.abs(Math.sin(t * 7.3) * Math.sin(t * 2.1));
+  target = {
+    state, level: state === 'listening' || state === 'speaking' ? wobble : 0,
+    user: t >= 8 ? 'Какая погода в Казани?' : '',
+    answer: state === 'speaking' ? 'В Казани сейчас четырнадцать градусов и ливень, сэр. Зонт не помешает.' : '',
+  };
+}
+
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const st = target.state;
+  const ease = k => 1 - Math.exp(-k * dt);
+  mix.listen += ((st === 'listening') - mix.listen) * ease(6);
+  mix.think  += ((st === 'thinking')  - mix.think)  * ease(4);
+  mix.speak  += ((st === 'speaking')  - mix.speak)  * ease(6);
+  mix.idle   += ((st === 'idle' || st === 'loading') - mix.idle) * ease(3);
+  // громкость: быстро вверх, плавно вниз
+  const lv = target.level || 0;
+  mix.level += (lv - mix.level) * ease(lv > mix.level ? 18 : 7);
+  innerTime += dt * (1 + 2.2 * mix.think + 0.8 * mix.level);
+
+  statusEl.textContent = LABELS[st] || '';
+  const caption = st === 'speaking' ? target.answer : (st === 'thinking' || st === 'listening') ? target.user : '';
+  if (captionEl.textContent !== caption) captionEl.textContent = caption;
+  captionEl.classList.toggle('on', !!caption);
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uTime, innerTime);
+  gl.uniform1f(uLevel, mix.level);
+  gl.uniform1f(uListen, mix.listen);
+  gl.uniform1f(uThink, mix.think);
+  gl.uniform1f(uSpeak, mix.speak);
+  gl.uniform1f(uIdle, mix.idle);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// Esc — закрыть окно (Добрыня продолжит работать голосом)
+addEventListener('keydown', e => { if (e.key === 'Escape' && window.pywebview) window.pywebview.api.quit(); });
+</script>
+</body>
+</html>
