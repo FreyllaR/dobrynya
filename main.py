@@ -11,6 +11,7 @@ import config
 import tools
 import ui
 from brain import Brain
+from voice import strip_tags
 
 STOP_WORDS = {"стоп", "хватит", "отбой", "пока", "всё", "все", "спасибо", "отдыхай", "свободен"}
 
@@ -101,7 +102,7 @@ def voice_mode():
                         first = False
                     print(piece, end="", flush=True)
                     answer_parts.append(piece)
-                    ui.set_state("thinking", answer="".join(answer_parts))
+                    ui.set_state("thinking", answer=strip_tags("".join(answer_parts)))
                     yield piece
                 print()
 

@@ -1,9 +1,9 @@
-"""Окно с шаром: прозрачное, без рамки, поверх остальных окон. Запускается из ui.py."""
+"""Окно с шаром: обычное окно macOS по центру экрана. Запускается из ui.py."""
 import sys
 
 import webview
 
-WIDTH, HEIGHT = 320, 400
+WIDTH, HEIGHT = 440, 580
 
 
 class Api:
@@ -14,13 +14,13 @@ class Api:
 
 def main():
     url = sys.argv[1]
+    on_top = len(sys.argv) > 2 and sys.argv[2] == "on-top"
     screen = webview.screens[0]
     webview.create_window(
         "Добрыня", url, js_api=Api(),
-        width=WIDTH, height=HEIGHT,
-        x=screen.width - WIDTH - 24, y=screen.height - HEIGHT - 60,  # правый нижний угол
-        frameless=True, easy_drag=True, transparent=True, on_top=True,
-        resizable=False, shadow=False, background_color="#000000",
+        width=WIDTH, height=HEIGHT, min_size=(360, 480),
+        x=(screen.width - WIDTH) // 2, y=(screen.height - HEIGHT) // 2,  # по центру экрана
+        on_top=on_top, background_color="#FFFFFF",
     )
     webview.start()
 

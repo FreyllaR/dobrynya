@@ -86,6 +86,9 @@ def start():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/"
-    proc = subprocess.Popen([sys.executable, str(config.BASE_DIR / "ui_window.py"), url],
+    args = [sys.executable, str(config.BASE_DIR / "ui_window.py"), url]
+    if config.ORB_ON_TOP:
+        args.append("on-top")
+    proc = subprocess.Popen(args,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     atexit.register(proc.terminate)

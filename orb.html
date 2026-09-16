@@ -6,30 +6,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   :root {
-    --text: rgba(255, 255, 255, 0.92);
-    --text-dim: rgba(255, 255, 255, 0.6);
-    --pill: rgba(12, 16, 28, 0.62);
+    --bg: #ffffff;
+    --text: #1d1d1f;
+    --text-dim: #6e6e73;
+    --pill: #f2f2f5;
   }
   html, body {
     margin: 0; height: 100%; overflow: hidden;
-    background: transparent;
-    font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    background: var(--bg);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     color: var(--text);
     -webkit-user-select: none; user-select: none; cursor: default;
   }
-  body.demo { background: #0b0d12; }
-  #stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; }
-  canvas { width: 300px; height: 300px; margin-top: 4px; }
+  #stage {
+    position: absolute; inset: 0; padding: 20px 28px 28px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  canvas { width: 320px; height: 320px; flex: none; }
   #status {
-    margin-top: -6px; padding: 4px 12px; border-radius: 999px;
-    background: var(--pill); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-    color: var(--text-dim); font-size: 12px; letter-spacing: 0.02em;
-    transition: color .3s;
+    margin-top: 4px; padding: 5px 14px; border-radius: 999px;
+    background: var(--pill); color: var(--text-dim);
+    font-size: 13px; font-weight: 500; letter-spacing: 0.01em;
   }
   #caption {
-    margin-top: 8px; max-width: 290px; min-height: 18px; padding: 0 8px;
+    margin-top: 16px; max-width: 380px; min-height: 66px;
     text-align: center; color: var(--text);
-    text-shadow: 0 1px 8px rgba(0, 0, 0, .8);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
     opacity: 0; transition: opacity .35s;
   }
@@ -37,8 +38,8 @@
 </style>
 </head>
 <body>
-<div id="stage" class="pywebview-drag-region">
-  <canvas id="orb" width="600" height="600" class="pywebview-drag-region"></canvas>
+<div id="stage">
+  <canvas id="orb" width="640" height="640"></canvas>
   <div id="status">Загружаюсь…</div>
   <div id="caption"></div>
 </div>
@@ -116,9 +117,10 @@ void main() {
   float alpha = smoothstep(r + aa, r - aa, d);
 
   // свечение вокруг шара, ярче когда говорит
-  float glowAmt = 0.18 + 0.35 * level * speak + 0.15 * think;
-  float glow = exp(-max(d - r, 0.0) * 22.0) * glowAmt * (1.0 - alpha);
-  vec3 glowCol = vec3(0.25, 0.55, 1.0);
+  float glowAmt = 0.22 + 0.35 * level * speak + 0.15 * think;
+  float glow = exp(-max(d - r, 0.0) * 16.0) * glowAmt * (1.0 - alpha)
+             * smoothstep(0.5, 0.38, d);   // гасим к краю холста, чтобы не было квадратной границы
+  vec3 glowCol = vec3(0.35, 0.62, 1.0);
 
   vec3 outCol = col * alpha + glowCol * glow;
   float outA = clamp(alpha + glow, 0.0, 1.0);
@@ -157,9 +159,7 @@ let target = { state: 'loading', level: 0, user: '', answer: '' };
 const mix = { listen: 0, think: 0, speak: 0, idle: 1, level: 0 };
 let innerTime = 0, last = performance.now(), failures = 0;
 
-const params = new URLSearchParams(location.search);
-const demo = params.has('demo');  // ?demo — анимация без Добрыни, ?bg — тёмный фон для просмотра в браузере
-if (demo || params.has('bg')) document.body.classList.add('demo');
+const demo = new URLSearchParams(location.search).has('demo');  // ?demo — анимация без Добрыни
 
 async function poll() {
   if (demo) return demoTick();
