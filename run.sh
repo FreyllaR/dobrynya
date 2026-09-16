@@ -8,14 +8,23 @@ if grep -q '^LLM_PROVIDER = "ollama"' config.py; then
   pgrep -x ollama >/dev/null || brew services start ollama
   sleep 1
   ollama list | grep -q "qwen3:8b" || ollama pull qwen3:8b
-elif ! grep -q "GEMINI_API_KEY=." .env 2>/dev/null && [ -z "$GEMINI_API_KEY" ]; then
-  echo "Впиши ключ Gemini в файл .env (получить бесплатно: https://aistudio.google.com/apikey)"
+elif [ -z "$GEMINI_API_KEY" ] && ! LC_ALL=C grep -qE "^GEMINI_API_KEY=[!-~]{20,}" .env 2>/dev/null; then
+  echo "Нет ключа Gemini. Получите его бесплатно: https://aistudio.google.com/apikey"
+  echo "и впишите в файл .env строкой: GEMINI_API_KEY=ваш_настоящий_ключ"
   exit 1
 fi
 
-if [ ! -d .venv ]; then
-  python3 -m venv .venv
-  .venv/bin/pip install -r requirements.txt
+# Зависимости ставим заново, если окружения нет, прошлая установка прервалась
+# или изменился requirements.txt
+STAMP=".venv/.requirements.sha"
+REQ_SHA=$(shasum requirements.txt | cut -d' ' -f1)
+if [ ! -x .venv/bin/python ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$REQ_SHA" ]; then
+  [ -x .venv/bin/python ] || python3 -m venv .venv
+  # pip 24.2+ проверяет сертификаты через связку ключей macOS, и на некоторых Маках
+  # это падает с CERTIFICATE_VERIFY_FAILED. Даём ему встроенный набор сертификатов.
+  CERT=$(.venv/bin/python -c "import pip._vendor.certifi as c; print(c.where())")
+  .venv/bin/python -m pip install --cert "$CERT" -r requirements.txt
+  echo "$REQ_SHA" > "$STAMP"
 fi
 
 if [ ! -d models/vosk-model-small-ru-0.22 ]; then

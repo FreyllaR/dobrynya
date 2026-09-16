@@ -24,7 +24,17 @@
 ```bash
 git clone git@github.com:FreyllaR/dobrynya.git
 cd dobrynya
-echo "GEMINI_API_KEY=ваш_ключ" > .env
+```
+
+Создайте файл `.env` со своим ключом Gemini (вместо `AIza...` — ваш настоящий ключ):
+
+```bash
+echo "GEMINI_API_KEY=AIza..." > .env
+```
+
+И запустите:
+
+```bash
 ./run.sh
 ```
 
