@@ -58,10 +58,18 @@ def strip_tags(text: str) -> str:
     return re.sub(r"\s+", " ", TAG_RE.sub("", text)).strip()
 
 
+INTERJECTION_RE = re.compile(r"(?<![\w-])(хм+|эх+|ах+|ох+|м-м+|мм+|ха-ха|хе-хе|угу|ну что ж)(?![\w-])[.,!…]*\s*", re.IGNORECASE)
+
+
 def qwen_text(text: str) -> str:
-    """Для Qwen3-TTS: звуковые теги превращаем в живые междометия, которые он произносит естественно."""
-    text = re.sub(r"\[sighs?\]", "Эх...", text, flags=re.IGNORECASE)
-    text = re.sub(r"\[(laughs?|giggles?|chuckles?)[^\]]*\]", "Ха-ха,", text, flags=re.IGNORECASE)
+    """Для Qwen3-TTS: звуковые теги — в живые междометия или, если они выключены, убираем совсем."""
+    if config.VOICE_NONVERBAL:
+        text = re.sub(r"\[sighs?\]", "Эх...", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[(laughs?|giggles?|chuckles?)[^\]]*\]", "Ха-ха,", text, flags=re.IGNORECASE)
+    else:
+        text = INTERJECTION_RE.sub("", TAG_RE.sub("", text))
+        text = re.sub(r"^\W+", "", text)
+        text = text[:1].upper() + text[1:]
     text = clean(text).replace("+", "")
     for word, spoken in config.NAME_PRONUNCIATION.items():  # написание «для слуха», если модель путает ударение
         text = re.sub(rf"\b{re.escape(word)}\b", spoken, text)

@@ -88,7 +88,7 @@ GEMINI_VOICE_STYLE = (            # режиссёрская заметка: к�
 )
 GEMINI_VOLUME = 0.9
 GEMINI_TTS_TIMEOUT = 8            # секунд ждать первый звук, потом — запасной голос Piper
-VOICE_NONVERBAL = True            # вздохи, смешки и «хм» в ответах (для gemini и qwen)
+VOICE_NONVERBAL = False           # True — вздохи, смешки и «хм» в ответах (для gemini и qwen)
 
 VOICE_EFFECT = "soft"             # "soft" — мягкий тёплый тембр; "" — без обработки
 VOICE_SOFTNESS = 0.7              # 0 — почти без обработки, 1 — максимально бархатно
